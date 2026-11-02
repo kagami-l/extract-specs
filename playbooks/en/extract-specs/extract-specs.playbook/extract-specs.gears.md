@@ -8,7 +8,7 @@ Roles:
 The role list is empty: Captain performs every step itself.
 
 The host may supply `<kit-dir>`, the path of the spec-extraction kit directory: `SKILL.md` with its `references/` and `templates/`.
-Where the host supplies none, `<kit-dir>` defaults to `auto`: the kit is the `extract-specs-pb-kit` skill of this playbook's spec package where Spex exports it, the project's `.claude/skills/` or `.agents/skills/` for a project's environment, else the same folders under the user's home for the user's own group's environment.
+Where the host supplies none, `<kit-dir>` defaults to `auto`: the kit is the `extract-specs-pb-kit` skill of this playbook's spec package where Spex installs it, under `.spex/packages/kgm/extract-specs/` in the project for a project's environment, else in the clone of the user's own group's spex repository under the Spex home; else where an earlier Spex exported it, the project's `.claude/skills/` or `.agents/skills/`, else the same folders under the user's home.
 The caller supplies optional instructions for Setup, such as the branch name, as `<caller-input>`.
 
 A work step is a fresh Captain call that knows only its instruction, the repository, and `.specs-extraction/`.
@@ -21,11 +21,11 @@ Every work step's prompt ends, after its own instruction, with the shared work-s
 
 When the caller starts `extract-specs`, Captain shall run:
 
-> mkdir -p .specs-extraction && { grep -qxF '*' .specs-extraction/.gitignore 2>/dev/null || printf '%s\n' '*' >> .specs-extraction/.gitignore; } && kit='<kit-dir>' && if [ "$kit" = auto ]; then kit=; for d in .claude/skills/extract-specs-pb-kit .agents/skills/extract-specs-pb-kit "$HOME/.claude/skills/extract-specs-pb-kit" "$HOME/.agents/skills/extract-specs-pb-kit"; do if [ -f "$d/SKILL.md" ]; then kit=$d; break; fi; done; fi && test -n "$kit" && test -f "$kit/SKILL.md" && rm -rf .specs-extraction/kit && cp -R "$kit" .specs-extraction/kit && test -f .specs-extraction/kit/SKILL.md && (cd "$kit" && pwd -P) > .specs-extraction/kit-source
+> mkdir -p .specs-extraction && { grep -qxF '*' .specs-extraction/.gitignore 2>/dev/null || printf '%s\n' '*' >> .specs-extraction/.gitignore; } && kit='<kit-dir>' && if [ "$kit" = auto ]; then kit=; installed=.spex/packages/kgm/extract-specs/skills/en/extract-specs-pb-kit; spexhome="${SPEX_HOME:-$HOME/.spex}"; own="$(sed -n 's/^own: *//p' "$spexhome/home.yaml" 2>/dev/null | head -n 1)"; for d in "$installed" "$spexhome/workspace/$own/$own-spex/$installed" .claude/skills/extract-specs-pb-kit .agents/skills/extract-specs-pb-kit "$HOME/.claude/skills/extract-specs-pb-kit" "$HOME/.agents/skills/extract-specs-pb-kit"; do if [ -f "$d/SKILL.md" ]; then kit=$d; break; fi; done; fi && test -n "$kit" && test -f "$kit/SKILL.md" && rm -rf .specs-extraction/kit && cp -R "$kit" .specs-extraction/kit && test -f .specs-extraction/kit/SKILL.md && (cd "$kit" && pwd -P) > .specs-extraction/kit-source
 
 Results:
 - `kitReady`: The command exits zero; continue with the plan check.
-- `kitMissing`: The command exits nonzero; extract-specs then ends in failure: no kit was found in the host's kit directory, or, for `auto`, where Spex exports the skill, or the kit could not be copied.
+- `kitMissing`: The command exits nonzero; extract-specs then ends in failure: no kit was found in the host's kit directory, or, for `auto`, where Spex installs the skill or an earlier Spex exported it, or the kit could not be copied.
 
 ## Dispatch
 
@@ -40,7 +40,17 @@ When the kit refresh results in `kitReady` or the worktree check results in `wor
 
 Results:
 - `planPresent`: The command exits zero; continue with the survey check.
-- `planAbsent`: The command exits nonzero; continue with Setup.
+- `planAbsent`: The command exits nonzero; continue with the start check.
+
+### extract-specs-25
+
+When the plan check results in `planAbsent` or the start gate results in `startHandled`, Captain shall run:
+
+> test -z "$(git status --porcelain)"
+
+Results:
+- `startClean`: The command exits zero; continue with Setup.
+- `startDirty`: The command exits nonzero; continue with the start gate.
 
 ### extract-specs-3
 
@@ -112,11 +122,36 @@ Results:
 - `package`: The command exits zero; continue with the package draft.
 - `otherItem`: The command exits nonzero; continue with the item step.
 
+## Start gate
+
+### extract-specs-26
+
+When the start check results in `startDirty`, Captain shall bring the worktree to Boss, relaying the complete caller input in quotes:
+
+> > Caller input: <caller-input>
+>
+> The extraction starts only from a clean worktree, and this one holds uncommitted changes. They belong to Boss, the human owner: your step puts them in front of Boss and does only what Boss's word allows.
+> There is no `plan.md` yet: the caller input above is the caller's instructions, and a branch it names is the extraction's branch, not one for these changes.
+> Before Boss has replied, ask Boss how to proceed. List every path `git status --porcelain` prints with its status, and name the current branch. Say that Boss may commit or clean the changes themselves and reply when done, or let you commit them, naming a branch if they want one other than the current branch.
+> After Boss lets you commit, stage and commit exactly the paths Boss's reply covers and nothing else Boss has staged. Read the changes first and write each commit's message for what it changes, in the form the repository's history shows, with no trailer; split unrelated changes into separate commits. Commit on the branch Boss names, creating it from the current commit where it does not exist, else on the current branch without switching, and stay on that branch.
+> After committing, ask Boss again: tell Boss the branch, and each commit's hash and message, and ask Boss to reply when the extraction may continue.
+>
+> The kit in `.specs-extraction/kit/` holds the rules of this extraction: `SKILL.md`, its `references/`, and its `templates/`. Read `SKILL.md` as the rule document for your step and resolve every `references/` or `templates/` path it names inside the kit; its frontmatter is addressed to skill loaders.
+> You are one fresh context doing one step. The workflow that called you opens every context, advances between steps, and checks `plan.md`, `spex lint`, and the worktree after you, so your step ends where its completion criterion is met.
+> Earlier steps reach you only through the repository and `.specs-extraction/`.
+> Follow the caller's instructions that the Setup section of `plan.md` records in every message and file you write.
+> Whatever language you write in, keep verbatim the words the workflow matches in `plan.md`: the headings `## Setup`, `## Progress` and `## Gate 1 decisions`, and the label that starts a Progress line: `Gate 1:`, `Decision records written`, a package's name in backticks, `Calibration:`, `Hand-over N:`, or `Gate 2:`. The rest of a line or heading may follow your language.
+> End with a short report: what you did, what you committed, and anything the human or the next step needs to know.
+
+Results:
+- `startHandled`: Boss replied that they committed or cleaned the changes, or Boss replied to Captain's question reporting the commits Boss allowed; continue with the start check. A question to Boss alone, or commits not yet reported to Boss in a question, support no outcome.
+- `startDeclined`: Boss declined to clean the worktree. Output shall include `startReport: <verbatim final text>`. extract-specs then ends in failure and returns startReport to its caller.
+
 ## Setup
 
 ### extract-specs-10
 
-When the plan check results in `planAbsent`, Captain shall set up the extraction, relaying the complete caller input in quotes:
+When the start check results in `startClean`, Captain shall set up the extraction, relaying the complete caller input in quotes:
 
 > > Caller input: <caller-input>
 >
@@ -363,6 +398,7 @@ Results:
 
 - extract-specs-1: captain → script
 - extract-specs-2: captain → script
+- extract-specs-25: captain → script
 - extract-specs-3: captain → script
 - extract-specs-4: captain → script
 - extract-specs-5: captain → script

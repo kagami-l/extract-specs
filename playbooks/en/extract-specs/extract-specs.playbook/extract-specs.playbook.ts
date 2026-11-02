@@ -55,7 +55,7 @@ export type {
  *   kit directory (the FSM's `kitDir` input). The host may supply it; where it
  *   supplies none, `<kit-dir>` defaults to `auto`, which uses the
  *   `extract-specs-pb-kit` skill of this playbook's spec package where Spex
- *   exports it.
+ *   installs it, else where an earlier Spex exported it.
  * - `cwd`: the working directory of the script states.
  *
  * The caller's `<caller-input>` arrives as the entry Boss text, not as an
@@ -80,6 +80,7 @@ const OPTION_SCHEMA: Readonly<Record<string, { readonly type: 'string'; readonly
 
 /** Direct-Captain working leaves that may suspend for a Boss reply. */
 const RESUMABLE_STATE_IDS: ReadonlySet<string> = new Set([
+  'startGate',
   'setup',
   'survey',
   'gateOneDelegate',
@@ -95,6 +96,7 @@ const RESUMABLE_STATE_IDS: ReadonlySet<string> = new Set([
 /** Root final states whose declared terminal kind is `failure`: the procedure stays unfinished. */
 const UNFINISHED_FINAL_STATE_IDS: ReadonlySet<string> = new Set([
   'kitMissing',
+  'startDeclined',
   'dirtyStart',
   'draftUncommitted',
   'reviewChangedRepository',

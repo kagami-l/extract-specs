@@ -10,6 +10,7 @@ import { assign, fromPromise, setup } from 'xstate';
 
 /** Direct-Captain working leaves; each supports Boss-reply suspension. */
 export type ResumableStateId =
+  | 'startGate'
   | 'setup'
   | 'survey'
   | 'gateOneDelegate'
@@ -25,6 +26,7 @@ export type ResumableStateId =
 export type ScriptStateId =
   | 'refreshKit'
   | 'checkPlan'
+  | 'checkStart'
   | 'checkSurvey'
   | 'recordItem'
   | 'checkGateOne'
@@ -42,6 +44,7 @@ export type ScriptStateId =
 export type InterruptTargetId = ResumableStateId | ScriptStateId;
 
 export const RESUMABLE_STATE_IDS = [
+  'startGate',
   'setup',
   'survey',
   'gateOneDelegate',
@@ -57,6 +60,7 @@ export const RESUMABLE_STATE_IDS = [
 export const INTERRUPT_TARGET_IDS = [
   'refreshKit',
   'checkPlan',
+  'checkStart',
   'checkSurvey',
   'recordItem',
   'checkGateOne',
@@ -64,6 +68,7 @@ export const INTERRUPT_TARGET_IDS = [
   'checkCalibration',
   'checkGateTwo',
   'checkPackage',
+  'startGate',
   'setup',
   'survey',
   'gateOneDelegate',
@@ -114,7 +119,7 @@ export interface ExtractSpecsInput {
    * Host-owned `<kit-dir>`: the path of the spec-extraction kit directory, or
    * `auto` — the host's value where it supplies no path — to use the
    * `extract-specs-pb-kit` skill of this playbook's spec package where Spex
-   * exports it.
+   * installs it, else where an earlier Spex exported it.
    */
   readonly kitDir: string;
   /** Optional seed for the caller's Setup instructions (`<caller-input>`). */
@@ -131,6 +136,7 @@ export type TerminalOutcome =
   | 'noItemLeft'
   | 'reported'
   | 'kitMissing'
+  | 'startDeclined'
   | 'dirtyStart'
   | 'draftUncommitted'
   | 'reviewChangedRepository'
@@ -143,6 +149,7 @@ export interface ExtractSpecsContext {
   readonly callerInput: string;
   readonly pendingBossQuestion?: PendingBossQuestion | undefined;
   readonly bossReply?: string | undefined;
+  readonly startReport?: string | undefined;
   readonly setupReport?: string | undefined;
   readonly gate2Report?: string | undefined;
   readonly terminalOutcome?: TerminalOutcome | undefined;
@@ -158,6 +165,7 @@ export type ExtractSpecsOutput =
   | { readonly outcome: 'noItemLeft' }
   | { readonly outcome: 'reported'; readonly gate2Report: string }
   | { readonly outcome: 'kitMissing' }
+  | { readonly outcome: 'startDeclined'; readonly startReport: string }
   | { readonly outcome: 'dirtyStart'; readonly setupReport: string }
   | { readonly outcome: 'draftUncommitted' }
   | { readonly outcome: 'reviewChangedRepository' }
@@ -180,6 +188,8 @@ export interface CaptainInput {
 }
 
 export type CaptainOutput =
+  | { readonly guard: 'startHandled' }
+  | { readonly guard: 'startDeclined'; readonly startReport: string }
   | { readonly guard: 'setUp' }
   | { readonly guard: 'dirtyStart'; readonly setupReport: string }
   | { readonly guard: 'done' }
@@ -199,6 +209,8 @@ export type ScriptOutput =
   | { readonly guard: 'kitMissing'; readonly exitStatus: number }
   | { readonly guard: 'planPresent'; readonly exitStatus: number }
   | { readonly guard: 'planAbsent'; readonly exitStatus: number }
+  | { readonly guard: 'startClean'; readonly exitStatus: number }
+  | { readonly guard: 'startDirty'; readonly exitStatus: number }
   | { readonly guard: 'surveyPending'; readonly exitStatus: number }
   | { readonly guard: 'surveyDone'; readonly exitStatus: number }
   | { readonly guard: 'itemRecorded'; readonly exitStatus: number }
@@ -231,6 +243,8 @@ const SCRIPT_GUARDS: readonly ScriptGuard[] = [
   'kitMissing',
   'planPresent',
   'planAbsent',
+  'startClean',
+  'startDirty',
   'surveyPending',
   'surveyDone',
   'itemRecorded',
@@ -297,10 +311,15 @@ export function scriptOutput(event: unknown): ScriptOutput | undefined {
 export function captainOutput(event: unknown): CaptainOutput | undefined {
   const output = outputOf(event);
   if (output === undefined) return undefined;
+  const startReport = output['startReport'];
   const setupReport = output['setupReport'];
   const gate2Report = output['gate2Report'];
   const question = output['question'];
   switch (output['guard']) {
+    case 'startHandled':
+      return { guard: 'startHandled' };
+    case 'startDeclined':
+      return nonEmpty(startReport) ? { guard: 'startDeclined', startReport } : undefined;
     case 'setUp':
       return { guard: 'setUp' };
     case 'dirtyStart':
@@ -371,6 +390,8 @@ export function terminalOutput(context: ExtractSpecsContext): ExtractSpecsOutput
   switch (context.terminalOutcome) {
     case 'reported':
       return { outcome: 'reported', gate2Report: context.gate2Report ?? '' };
+    case 'startDeclined':
+      return { outcome: 'startDeclined', startReport: context.startReport ?? '' };
     case 'dirtyStart':
       return { outcome: 'dirtyStart', setupReport: context.setupReport ?? '' };
     case 'noItemLeft':
@@ -402,10 +423,10 @@ function captainResult(guard: CaptainOutput['guard']) {
   return ({ event }: { event: unknown }): boolean => captainOutput(event)?.guard === guard;
 }
 
-/** Approval is available only after Boss has replied to this leaf's question. */
-function approvedAfterBossReply(stateId: ResumableStateId) {
+/** An outcome that rests on Boss's word is available only after Boss has replied to this leaf's question. */
+function afterBossReply(guard: CaptainOutput['guard'], stateId: ResumableStateId) {
   return ({ context, event }: { context: ExtractSpecsContext; event: unknown }): boolean =>
-    captainOutput(event)?.guard === 'approved' && hasReplyFor(context, stateId);
+    captainOutput(event)?.guard === guard && hasReplyFor(context, stateId);
 }
 
 function askBoss(stateId: ResumableStateId, sourceItem: string) {
@@ -533,6 +554,12 @@ export const extractSpecsMachine = setup({
     recordTerminal: assign((_args, params: { outcome: TerminalOutcome }) => ({
       terminalOutcome: params.outcome,
     })),
+    recordStartReport: assign(({ event }) => {
+      const output = captainOutput(event);
+      return output?.guard === 'startDeclined'
+        ? { startReport: output.startReport, terminalOutcome: 'startDeclined' as const }
+        : {};
+    }),
     recordSetupReport: assign(({ event }) => {
       const output = captainOutput(event);
       return output?.guard === 'dirtyStart'
@@ -574,11 +601,11 @@ export const extractSpecsMachine = setup({
 
     refreshKit: {
       id: 'refreshKit',
-      description: 'Refresh the kit copy in .specs-extraction/kit from the kit directory, or from the exported extract-specs-pb-kit skill when it is auto.',
+      description: 'Refresh the kit copy in .specs-extraction/kit from the kit directory, or from the installed or exported extract-specs-pb-kit skill when it is auto.',
       meta: {
         playbook: {
           stateId: 'refreshKit',
-          description: 'Refresh the kit copy in .specs-extraction/kit from the kit directory, or from the exported extract-specs-pb-kit skill when it is auto.',
+          description: 'Refresh the kit copy in .specs-extraction/kit from the kit directory, or from the installed or exported extract-specs-pb-kit skill when it is auto.',
         },
       },
       tags: ['playbook.busy'],
@@ -587,10 +614,10 @@ export const extractSpecsMachine = setup({
         input: ({ context }): ScriptInput => ({
           stateId: 'refreshKit',
           sourceItem: 'extract-specs-1',
-          command: bindShellWord("mkdir -p .specs-extraction && { grep -qxF '*' .specs-extraction/.gitignore 2>/dev/null || printf '%s\\n' '*' >> .specs-extraction/.gitignore; } && kit='<kit-dir>' && if [ \"$kit\" = auto ]; then kit=; for d in .claude/skills/extract-specs-pb-kit .agents/skills/extract-specs-pb-kit \"$HOME/.claude/skills/extract-specs-pb-kit\" \"$HOME/.agents/skills/extract-specs-pb-kit\"; do if [ -f \"$d/SKILL.md\" ]; then kit=$d; break; fi; done; fi && test -n \"$kit\" && test -f \"$kit/SKILL.md\" && rm -rf .specs-extraction/kit && cp -R \"$kit\" .specs-extraction/kit && test -f .specs-extraction/kit/SKILL.md && (cd \"$kit\" && pwd -P) > .specs-extraction/kit-source", "'<kit-dir>'", context.kitDir),
+          command: bindShellWord("mkdir -p .specs-extraction && { grep -qxF '*' .specs-extraction/.gitignore 2>/dev/null || printf '%s\\n' '*' >> .specs-extraction/.gitignore; } && kit='<kit-dir>' && if [ \"$kit\" = auto ]; then kit=; installed=.spex/packages/kgm/extract-specs/skills/en/extract-specs-pb-kit; spexhome=\"${SPEX_HOME:-$HOME/.spex}\"; own=\"$(sed -n 's/^own: *//p' \"$spexhome/home.yaml\" 2>/dev/null | head -n 1)\"; for d in \"$installed\" \"$spexhome/workspace/$own/$own-spex/$installed\" .claude/skills/extract-specs-pb-kit .agents/skills/extract-specs-pb-kit \"$HOME/.claude/skills/extract-specs-pb-kit\" \"$HOME/.agents/skills/extract-specs-pb-kit\"; do if [ -f \"$d/SKILL.md\" ]; then kit=$d; break; fi; done; fi && test -n \"$kit\" && test -f \"$kit/SKILL.md\" && rm -rf .specs-extraction/kit && cp -R \"$kit\" .specs-extraction/kit && test -f .specs-extraction/kit/SKILL.md && (cd \"$kit\" && pwd -P) > .specs-extraction/kit-source", "'<kit-dir>'", context.kitDir),
           result: {
             kitReady: "The command exits zero; continue with the plan check.",
-            kitMissing: "The command exits nonzero; extract-specs then ends in failure: no kit was found in the host's kit directory, or, for `auto`, where Spex exports the skill, or the kit could not be copied.",
+            kitMissing: "The command exits nonzero; extract-specs then ends in failure: no kit was found in the host's kit directory, or, for `auto`, where Spex installs the skill or an earlier Spex exported it, or the kit could not be copied.",
           },
         }),
         onDone: [
@@ -621,13 +648,43 @@ export const extractSpecsMachine = setup({
           command: "test -e .specs-extraction/plan.md",
           result: {
             planPresent: "The command exits zero; continue with the survey check.",
-            planAbsent: "The command exits nonzero; continue with Setup.",
+            planAbsent: "The command exits nonzero; continue with the start check.",
           },
         }),
         onDone: [
           { guard: scriptResult('planPresent', true), target: 'checkSurvey' },
-          { guard: scriptResult('planAbsent', false), target: 'setup' },
+          { guard: scriptResult('planAbsent', false), target: 'checkStart' },
           invalidScriptOutput('checkPlan'),
+        ],
+        onError: scriptError,
+      },
+    },
+
+    checkStart: {
+      id: 'checkStart',
+      description: 'Check that the worktree is clean before the extraction starts.',
+      meta: {
+        playbook: {
+          stateId: 'checkStart',
+          description: 'Check that the worktree is clean before the extraction starts.',
+        },
+      },
+      tags: ['playbook.busy'],
+      invoke: {
+        src: 'script',
+        input: (): ScriptInput => ({
+          stateId: 'checkStart',
+          sourceItem: 'extract-specs-25',
+          command: "test -z \"$(git status --porcelain)\"",
+          result: {
+            startClean: "The command exits zero; continue with Setup.",
+            startDirty: "The command exits nonzero; continue with the start gate.",
+          },
+        }),
+        onDone: [
+          { guard: scriptResult('startClean', true), target: 'setup' },
+          { guard: scriptResult('startDirty', false), target: 'startGate' },
+          invalidScriptOutput('checkStart'),
         ],
         onError: scriptError,
       },
@@ -827,6 +884,62 @@ export const extractSpecsMachine = setup({
       },
     },
 
+    // ----- Start gate ------------------------------------------------------
+
+    startGate: {
+      id: 'startGate',
+      description: 'Bring the dirty worktree to Boss before the extraction starts.',
+      meta: {
+        playbook: { stateId: 'startGate', description: 'Bring the dirty worktree to Boss before the extraction starts.' },
+      },
+      tags: ['playbook.busy'],
+      invoke: {
+        src: 'captain',
+        input: ({ context }): CaptainInput =>
+          captainInput(context, {
+            stateId: 'startGate',
+            sourceItem: 'extract-specs-26',
+            prompt: [
+              "> Caller input: <caller-input>",
+              "",
+              "The extraction starts only from a clean worktree, and this one holds uncommitted changes. They belong to Boss, the human owner: your step puts them in front of Boss and does only what Boss's word allows.",
+              "There is no `plan.md` yet: the caller input above is the caller's instructions, and a branch it names is the extraction's branch, not one for these changes.",
+              "Before Boss has replied, ask Boss how to proceed. List every path `git status --porcelain` prints with its status, and name the current branch. Say that Boss may commit or clean the changes themselves and reply when done, or let you commit them, naming a branch if they want one other than the current branch.",
+              "After Boss lets you commit, stage and commit exactly the paths Boss's reply covers and nothing else Boss has staged. Read the changes first and write each commit's message for what it changes, in the form the repository's history shows, with no trailer; split unrelated changes into separate commits. Commit on the branch Boss names, creating it from the current commit where it does not exist, else on the current branch without switching, and stay on that branch.",
+              "After committing, ask Boss again: tell Boss the branch, and each commit's hash and message, and ask Boss to reply when the extraction may continue.",
+              "",
+              "The kit in `.specs-extraction/kit/` holds the rules of this extraction: `SKILL.md`, its `references/`, and its `templates/`. Read `SKILL.md` as the rule document for your step and resolve every `references/` or `templates/` path it names inside the kit; its frontmatter is addressed to skill loaders.",
+              "You are one fresh context doing one step. The workflow that called you opens every context, advances between steps, and checks `plan.md`, `spex lint`, and the worktree after you, so your step ends where its completion criterion is met.",
+              "Earlier steps reach you only through the repository and `.specs-extraction/`.",
+              "Follow the caller's instructions that the Setup section of `plan.md` records in every message and file you write.",
+              "Whatever language you write in, keep verbatim the words the workflow matches in `plan.md`: the headings `## Setup`, `## Progress` and `## Gate 1 decisions`, and the label that starts a Progress line: `Gate 1:`, `Decision records written`, a package's name in backticks, `Calibration:`, `Hand-over N:`, or `Gate 2:`. The rest of a line or heading may follow your language.",
+              "End with a short report: what you did, what you committed, and anything the human or the next step needs to know.",
+            ].join('\n'),
+            result: {
+              startHandled: "Boss replied that they committed or cleaned the changes, or Boss replied to Captain's question reporting the commits Boss allowed; continue with the start check. A question to Boss alone, or commits not yet reported to Boss in a question, support no outcome.",
+              startDeclined: "Boss declined to clean the worktree. Output shall include `startReport: <verbatim final text>`. extract-specs then ends in failure and returns startReport to its caller.",
+              needsBossReply: "The acting agent's prose surfaces a clarifying question for Boss that the agent cannot answer alone. Output shall include `question: <verbatim question text from the acting agent's prose>`.",
+            },
+            callerInput: context.callerInput,
+          }),
+        onDone: [
+          {
+            guard: afterBossReply('startHandled', 'startGate'),
+            target: 'checkStart',
+            actions: 'clearBossReplyContext',
+          },
+          {
+            guard: afterBossReply('startDeclined', 'startGate'),
+            target: 'startDeclined',
+            actions: ['clearBossReplyContext', 'recordStartReport'],
+          },
+          askBoss('startGate', 'extract-specs-26'),
+          invalidCaptainOutput('startGate'),
+        ],
+        onError: captainError,
+      },
+    },
+
     // ----- Setup -----------------------------------------------------------
 
     setup: {
@@ -990,7 +1103,7 @@ export const extractSpecsMachine = setup({
           }),
         onDone: [
           {
-            guard: approvedAfterBossReply('gateOne'),
+            guard: afterBossReply('approved', 'gateOne'),
             target: 'checkItemChecked',
             actions: 'clearBossReplyContext',
           },
@@ -1040,7 +1153,7 @@ export const extractSpecsMachine = setup({
           }),
         onDone: [
           {
-            guard: approvedAfterBossReply('calibration'),
+            guard: afterBossReply('approved', 'calibration'),
             target: 'checkItemChecked',
             actions: 'clearBossReplyContext',
           },
@@ -1488,11 +1601,26 @@ export const extractSpecsMachine = setup({
     kitMissing: {
       id: 'kitMissing',
       type: 'final',
-      description: "extract-specs ended in failure: no kit was found in the host's kit directory, or, for auto, where Spex exports the skill, or the kit could not be copied.",
+      description: "extract-specs ended in failure: no kit was found in the host's kit directory, or, for auto, where Spex installs the skill or an earlier Spex exported it, or the kit could not be copied.",
       meta: {
         playbook: {
           stateId: 'kitMissing',
-          description: "extract-specs ended in failure: no kit was found in the host's kit directory, or, for auto, where Spex exports the skill, or the kit could not be copied.",
+          description: "extract-specs ended in failure: no kit was found in the host's kit directory, or, for auto, where Spex installs the skill or an earlier Spex exported it, or the kit could not be copied.",
+          terminal: 'failure',
+        },
+      },
+    },
+
+    startDeclined: {
+      id: 'startDeclined',
+      type: 'final',
+      description:
+        'extract-specs ended in failure: Boss declined to clean the worktree before the extraction started, and the start report was returned to its caller.',
+      meta: {
+        playbook: {
+          stateId: 'startDeclined',
+          description:
+            'extract-specs ended in failure: Boss declined to clean the worktree before the extraction started, and the start report was returned to its caller.',
           terminal: 'failure',
         },
       },
