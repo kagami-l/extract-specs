@@ -8,7 +8,7 @@ Roles:
 The role list is empty: Captain performs every step itself.
 
 The host may supply `<kit-dir>`, the path of the spec-extraction kit directory: `SKILL.md` with its `references/` and `templates/`.
-Where the host supplies none, `<kit-dir>` defaults to `auto`: the kit is the `extract-specs-pb-kit` skill of this playbook's spec package where Spex installs it, under `.spex/packages/kgm/extract-specs/` in the project for a project's environment, else in the clone of the user's own group's spex repository under the Spex home; else where an earlier Spex exported it, the project's `.claude/skills/` or `.agents/skills/`, else the same folders under the user's home.
+Where the host supplies none, `<kit-dir>` defaults to `auto`: the kit is the `extract-specs-pb-kit` skill of this playbook's spec package where Spex installs it, under `.spex/packages/merico-ai/extract-specs/` in the project for a project's environment, else in the clone of the user's own group's spex repository under the Spex home; else where an earlier Spex exported it, the project's `.claude/skills/` or `.agents/skills/`, else the same folders under the user's home.
 The caller supplies optional instructions for Setup, such as the branch name, as `<caller-input>`.
 
 A work step is a fresh Captain call that knows only its instruction, the repository, and `.specs-extraction/`.
@@ -21,7 +21,7 @@ Every work step's prompt ends, after its own instruction, with the shared work-s
 
 When the caller starts `extract-specs`, Captain shall run:
 
-> mkdir -p .specs-extraction && { grep -qxF '*' .specs-extraction/.gitignore 2>/dev/null || printf '%s\n' '*' >> .specs-extraction/.gitignore; } && kit='<kit-dir>' && if [ "$kit" = auto ]; then kit=; installed=.spex/packages/kgm/extract-specs/skills/en/extract-specs-pb-kit; spexhome="${SPEX_HOME:-$HOME/.spex}"; own="$(sed -n 's/^own: *//p' "$spexhome/home.yaml" 2>/dev/null | head -n 1)"; for d in "$installed" "$spexhome/workspace/$own/$own-spex/$installed" .claude/skills/extract-specs-pb-kit .agents/skills/extract-specs-pb-kit "$HOME/.claude/skills/extract-specs-pb-kit" "$HOME/.agents/skills/extract-specs-pb-kit"; do if [ -f "$d/SKILL.md" ]; then kit=$d; break; fi; done; fi && test -n "$kit" && test -f "$kit/SKILL.md" && rm -rf .specs-extraction/kit && cp -R "$kit" .specs-extraction/kit && test -f .specs-extraction/kit/SKILL.md && (cd "$kit" && pwd -P) > .specs-extraction/kit-source
+> mkdir -p .specs-extraction && { grep -qxF '*' .specs-extraction/.gitignore 2>/dev/null || printf '%s\n' '*' >> .specs-extraction/.gitignore; } && kit='<kit-dir>' && if [ "$kit" = auto ]; then kit=; installed=.spex/packages/merico-ai/extract-specs/skills/en/extract-specs-pb-kit; spexhome="${SPEX_HOME:-$HOME/.spex}"; own="$(sed -n 's/^own: *//p' "$spexhome/home.yaml" 2>/dev/null | head -n 1)"; for d in "$installed" "$spexhome/workspace/$own/$own-spex/$installed" .claude/skills/extract-specs-pb-kit .agents/skills/extract-specs-pb-kit "$HOME/.claude/skills/extract-specs-pb-kit" "$HOME/.agents/skills/extract-specs-pb-kit"; do if [ -f "$d/SKILL.md" ]; then kit=$d; break; fi; done; fi && test -n "$kit" && test -f "$kit/SKILL.md" && rm -rf .specs-extraction/kit && cp -R "$kit" .specs-extraction/kit && test -f .specs-extraction/kit/SKILL.md && (cd "$kit" && pwd -P) > .specs-extraction/kit-source
 
 Results:
 - `kitReady`: The command exits zero; continue with the plan check.

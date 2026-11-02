@@ -1,7 +1,7 @@
 format: 2
-org: kgm
+org: merico-ai
 name: extract-specs
-version: 0.2.0
+version: 0.3.0
 description: Write a lawful specs/ tree for an existing project that has none, as-is and evidence-backed, with the rules of the spec-extraction skill run step by step by the extract-specs playbook.
 license: Apache-2.0
 repository: https://github.com/kagami-l/extract-specs

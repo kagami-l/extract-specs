@@ -1,4 +1,4 @@
-# kgm/extract-specs
+# merico-ai/extract-specs
 
 [中文说明](#中文说明)
 
@@ -25,8 +25,8 @@ It holds two things:
    | Field | Value |
    | --- | --- |
    | Repository | `https://github.com/kagami-l/extract-specs.git` |
-   | Branch or tag | a release tag, such as `v0.2.0` |
-   | Spec package name | `kgm/extract-specs` |
+   | Branch or tag | a release tag, such as `v0.3.0` |
+   | Spec package name | `merico-ai/extract-specs` |
 
    The package sits at the root of the repository, so no folder inside it is needed.
    Personal packages are available in every project of yours.
@@ -57,7 +57,7 @@ After an interruption, `/extract-specs <a sentence>` resumes at the first unchec
 ## Where the rules come from
 
 Each run copies the kit into `.specs-extraction/kit/` first.
-By default it takes the `extract-specs-pb-kit` skill where Spex installs it: the project's `.spex/packages/kgm/extract-specs/`, else your Personal packages under the Spex home (`~/.spex`, or `SPEX_HOME`).
+By default it takes the `extract-specs-pb-kit` skill where Spex installs it: the project's `.spex/packages/merico-ai/extract-specs/`, else your Personal packages under the Spex home (`~/.spex`, or `SPEX_HOME`).
 Spex installs the skill only as the playbook's support, so it never appears among your agents' skills.
 An earlier Spex that exported it is still served: the project's `.claude/skills/` or `.agents/skills/`, else the same folders in your home.
 The path it used is recorded in `.specs-extraction/kit-source`.
@@ -92,8 +92,8 @@ Apache-2.0.
    | 字段 | 填写 |
    | --- | --- |
    | Repository | `https://github.com/kagami-l/extract-specs.git` |
-   | Branch or tag | 一个发版标签，例如 `v0.2.0` |
-   | Spec package name | `kgm/extract-specs` |
+   | Branch or tag | 一个发版标签，例如 `v0.3.0` |
+   | Spec package name | `merico-ai/extract-specs` |
 
    包就在仓库根目录，不用填仓库里的目录。
    Personal 里的包在你的每个项目里都能用。
@@ -124,7 +124,7 @@ Apache-2.0.
 ### 规则从哪来
 
 每次运行先把 kit 复制进 `.specs-extraction/kit/`。
-默认取 Spex 安装的 `extract-specs-pb-kit` 技能：先找项目的 `.spex/packages/kgm/extract-specs/`，再找 Spex home（`~/.spex`，或 `SPEX_HOME`）下你的 Personal 安装。
+默认取 Spex 安装的 `extract-specs-pb-kit` 技能：先找项目的 `.spex/packages/merico-ai/extract-specs/`，再找 Spex home（`~/.spex`，或 `SPEX_HOME`）下你的 Personal 安装。
 Spex 只把它当作 playbook 的附属安装，所以它不会出现在 agent 的技能目录里。
 旧版 Spex 会把它导出到技能目录，这种情况也照样能找到：先找项目的 `.claude/skills/` 或 `.agents/skills/`，再找主目录下的同样两处。
 实际用到的路径记在 `.specs-extraction/kit-source`。
